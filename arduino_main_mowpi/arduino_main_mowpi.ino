@@ -7,7 +7,10 @@
 // ln -s ~/Projects/mower_chassis/arduino_mowpi/BladeControl ~/Arduino/libraries/BladeControl
 
 #define DEBUG_PERIOD 500
-#define CMD_DEBOUNCE 100
+#define CMD_PERIOD 100
+#define CMD_FILT_FACTOR 0.5
+
+#define BOT_RADIUS_CM 35.0
 
 // Initialize a PPMReader on digital pin 3 with 6 expected channels.
 // PPMReader uses hard interrupts, uno pins 2 or 3
@@ -26,12 +29,17 @@ int16_t auto_pwm = 1500;
 int16_t scaled_speed_power = 0;
 int16_t scaled_steer_power = 0;
 
+int speed_cm = 0;
+int omega_deg = 0;
+int left_auto_output = 0;
+int right_auto_output = 0;
+
 //RC CHANNELS
 #define RC_STEER 1
 #define RC_SPEED 2
-#define RC_THROTTLE 3
+#define RC_THROTTLE 5
 #define RC_BLADE 4
-#define RC_AUTO 5
+#define RC_AUTO 3
 
 //**************Encoders*************
 #include <PinChangeInt.h>
@@ -179,21 +187,44 @@ void loop() {
     
     timeDEBUG = millis();
   }
-  
-  if(abs(speed_pwm - 1500) < 300 && abs(steer_pwm-1500) < 300 && (millis() - timeCMD > CMD_DEBOUNCE) )
+
+  if(millis() - timeCMD > CMD_PERIOD)
   {
     timeCMD = millis();
-    // power -2047 to 2047
-    scaled_speed_power = (speed_pwm - 1500)*2;
-    scaled_steer_power = (steer_pwm - 1500)*2;
+    if(auto_pwm < 1300)
+    {
+      if(abs(speed_pwm - 1500) < 300 && abs(steer_pwm-1500) < 300 )
+      {
+        // power -2047 to 2047
+        scaled_speed_power = (speed_pwm - 1500)*2;
+        scaled_steer_power = (steer_pwm - 1500)*2;
+      }
+      else if(abs(speed_pwm - 1500) > 500 || abs(steer_pwm-1500) > 500)
+      {
+        scaled_speed_power = 0;
+        scaled_steer_power = 0;
+      }
+      ST.drive(scaled_speed_power);
+      ST.turn(-scaled_steer_power);
+      left_auto_output = 0;
+      right_auto_output = 0;
+    }
+    else //auto mode!
+    {
+      float left_cm = speed_cm - BOT_RADIUS_CM*float(omega_deg)*3.14/180.0;
+      float right_cm = speed_cm + BOT_RADIUS_CM*float(omega_deg)*3.14/180.0;
+      left_cm = min(left_cm, 150);
+      left_cm = max(left_cm, -150);
+      right_cm = min(right_cm, 150);
+      right_cm = max(right_cm, -150);
+      int left_output = left_cm * 7; //-2047 to 2047, 120 cm/sec maps to 600 for now
+      int right_output = right_cm * 7;
+      left_auto_output = left_auto_output * CMD_FILT_FACTOR + left_output * (1 - CMD_FILT_FACTOR);
+      right_auto_output = right_auto_output * CMD_FILT_FACTOR + right_output * (1 - CMD_FILT_FACTOR);
+      ST.motor(LEFT_MOTOR, left_auto_output);
+      ST.motor(RIGHT_MOTOR, right_auto_output);
+    }
   }
-  else if(abs(speed_pwm - 1500) > 500 || abs(steer_pwm-1500) > 500)
-  {
-    scaled_speed_power = 0;
-    scaled_steer_power = 0;
-  }
-  ST.drive(scaled_speed_power);
-  ST.turn(-scaled_steer_power);
 
   // A3/4/ encoder request
   // A1/1/speed_byte,curv_byte
@@ -211,8 +242,8 @@ void loop() {
           case 1: // A1/1/
           {
             // Read the next two numbers <raw speed 0 to 240>/<raw omega 0 to 240>/
-            int speed_cm = getSerial()-120;
-            int omega_deg = getSerial()-120;
+            speed_cm = getSerial()-120;
+            omega_deg = getSerial()-120;
             
             // Read the next two bytes as int8 speed cm/s, int8 omega deg/sec
             //int speed_cm = Serial.read() - 120;
