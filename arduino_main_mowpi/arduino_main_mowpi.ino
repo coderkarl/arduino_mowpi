@@ -21,10 +21,10 @@ PPMReader ppm(interruptPin, channelAmount);
 
 long timeDEBUG, timeCMD;
 
-int16_t steer_pwm = 1500;
-int16_t speed_pwm = 1500;
-int16_t blade_pwm = 1500;
-int16_t auto_pwm = 1500;
+int16_t prev_steer_pwm = 1500, steer_pwm = 1500;
+int16_t prev_speed_pwm = 1500, speed_pwm = 1500;
+int16_t prev_blade_pwm = 1500, blade_pwm = 1500;
+int16_t prev_auto_pwm = 1500,  auto_pwm = 1500;
 
 int16_t scaled_speed_power = 0;
 int16_t scaled_steer_power = 0;
@@ -148,10 +148,31 @@ void loop() {
 
   update_ST_data();
 
-  steer_pwm = ppm.latestValidChannelValue(RC_STEER, 0);
-  speed_pwm = ppm.latestValidChannelValue(RC_SPEED, 0);
-  blade_pwm = ppm.latestValidChannelValue(RC_BLADE, 0);
-  auto_pwm = ppm.latestValidChannelValue(RC_AUTO, 0);
+  steer_pwm = ppm.latestValidChannelValue(RC_STEER, 1500);
+  speed_pwm = ppm.latestValidChannelValue(RC_SPEED, 1500);
+  blade_pwm = ppm.latestValidChannelValue(RC_BLADE, 1500);
+  auto_pwm = ppm.latestValidChannelValue(RC_AUTO, 1500);
+
+  /*if(abs(steer_pwm - prev_steer_pwm) > 200 && abs(steer_pwm - 1500) > 50)
+  {
+    steer_pwm = prev_steer_pwm;
+  }
+  if(abs(speed_pwm - prev_speed_pwm) > 200 && abs(speed_pwm - 1500) > 50)
+  {
+    speed_pwm = prev_speed_pwm;
+  }
+  if(abs(blade_pwm - prev_blade_pwm) > 200 && abs(blade_pwm - 1500) > 50)
+  {
+    blade_pwm = prev_blade_pwm;
+  }
+  if(abs(auto_pwm - prev_auto_pwm) > 200 && abs(auto_pwm - 1500) > 50)
+  {
+    auto_pwm = prev_auto_pwm;
+  }*/
+  prev_steer_pwm = steer_pwm;
+  prev_speed_pwm = speed_pwm;
+  prev_blade_pwm = blade_pwm;
+  prev_auto_pwm = auto_pwm;
   
   if(timeSince(timeDEBUG) > DEBUG_PERIOD)
   {
@@ -191,15 +212,15 @@ void loop() {
   if(millis() - timeCMD > CMD_PERIOD)
   {
     timeCMD = millis();
-    if(auto_pwm < 1300)
+    if(auto_pwm < 1700)
     {
-      if(abs(speed_pwm - 1500) < 300 && abs(steer_pwm-1500) < 300 )
+      if(abs(speed_pwm - 1500) <= 500 && abs(steer_pwm-1500) <= 500 )
       {
         // power -2047 to 2047
-        scaled_speed_power = (speed_pwm - 1500)*2;
-        scaled_steer_power = (steer_pwm - 1500)*2;
+        scaled_speed_power = ((float)(speed_pwm - 1500))*1.5;
+        scaled_steer_power = ((float)(steer_pwm - 1500))*1.5;
       }
-      else if(abs(speed_pwm - 1500) > 500 || abs(steer_pwm-1500) > 500)
+      else
       {
         scaled_speed_power = 0;
         scaled_steer_power = 0;
