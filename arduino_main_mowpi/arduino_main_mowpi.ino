@@ -8,6 +8,7 @@
 
 #define DEBUG_PERIOD 500
 #define CMD_PERIOD 100
+#define BLADE_DB 500
 #define CMD_FILT_FACTOR 0.5
 
 #define BOT_RADIUS_CM 35.0
@@ -18,8 +19,13 @@
 int interruptPin = 3;
 int channelAmount = 6;
 PPMReader ppm(interruptPin, channelAmount);
+#define PPM_ERROR_PIN 4
+bool ppm_error_state = false;
 
 long timeDEBUG, timeCMD;
+long timeREQBLADE;
+bool blade_on = false;
+bool blade_des = false;
 
 int16_t prev_steer_pwm = 1500, steer_pwm = 1500;
 int16_t prev_speed_pwm = 1500, speed_pwm = 1500;
@@ -111,6 +117,8 @@ void setup() {
 
 
   //pinMode(7, INPUT_PULLUP);
+  pinMode(PPM_ERROR_PIN, OUTPUT);
+  digitalWrite(PPM_ERROR_PIN, LOW);
 
   pinMode(LEFT_ENC_A, INPUT);
   pinMode(LEFT_ENC_B, INPUT);
@@ -139,11 +147,37 @@ void loop() {
   int bladeState = -1;
   if(900 < blade_pwm && blade_pwm < 1100)
   {
-    bladeState = blade_control.update_blade(BLADE_CONTROL_ON_STATE, bladeCmdA, bladeCmdB);
+    if(!blade_des)
+    {
+      blade_des = true;
+      timeREQBLADE = millis();
+    }
+    else if(!blade_on && timeSince(timeREQBLADE) > BLADE_DB)
+    {
+      blade_on = true;
+    }
+    
+    if(blade_on)
+    {
+      bladeState = blade_control.update_blade(BLADE_CONTROL_ON_STATE, bladeCmdA, bladeCmdB);
+    }
   }
   else
   {
-    bladeState = blade_control.update_blade(BLADE_CONTROL_OFF_STATE, bladeCmdA, bladeCmdB);
+    if(blade_des)
+    {
+      blade_des = false;
+      timeREQBLADE = millis();
+    }
+    else if(blade_on && timeSince(timeREQBLADE) > BLADE_DB)
+    {
+      blade_on = false;
+    }
+    
+    if(!blade_on)
+    {
+      bladeState = blade_control.update_blade(BLADE_CONTROL_OFF_STATE, bladeCmdA, bladeCmdB);
+    }
   }
 
   update_ST_data();
@@ -152,6 +186,19 @@ void loop() {
   speed_pwm = ppm.latestValidChannelValue(RC_SPEED, 1500);
   blade_pwm = ppm.latestValidChannelValue(RC_BLADE, 1500);
   auto_pwm = ppm.latestValidChannelValue(RC_AUTO, 1500);
+  if( (abs(steer_pwm - 1500) > 300) || blade_pwm < 1400)
+  {
+    if(!ppm_error_state)
+    {
+      digitalWrite(PPM_ERROR_PIN, HIGH);
+      ppm_error_state = true;
+    }
+  }
+  else if(ppm_error_state)
+  {
+    ppm_error_state = false;
+    digitalWrite(PPM_ERROR_PIN, LOW);
+  }
 
   /*if(abs(steer_pwm - prev_steer_pwm) > 200 && abs(steer_pwm - 1500) > 50)
   {
