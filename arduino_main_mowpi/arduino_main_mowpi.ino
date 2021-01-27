@@ -1,3 +1,20 @@
+// BNO055
+
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BNO055.h>
+Adafruit_BNO055 bno = Adafruit_BNO055();
+#define GYRO_BIAS_DEG 0.00
+#define GYRO_SCALE_FACTOR 0.978
+bool gyroReady = false;
+#define GYRO_PERIOD 20
+long gyro_time;
+float delta_yaw_deg = 0.0;
+float yaw_deg = 0.0;
+float gyro_z = 0.0;
+
+
+
 // https://github.com/Nikkilae/PPM-reader
 #include <PPMReader.h>
 // #include <InterruptHandler.h>   <-- You may need this on some versions of Arduino
@@ -19,7 +36,7 @@
 int interruptPin = 3;
 int channelAmount = 6;
 PPMReader ppm(interruptPin, channelAmount);
-#define PPM_ERROR_PIN 4
+#define PPM_ERROR_PIN 10
 bool ppm_error_state = false;
 
 long timeDEBUG, timeCMD;
@@ -48,11 +65,16 @@ int right_auto_output = 0;
 #define RC_AUTO 3
 
 //**************Encoders*************
+// Port B, pin 8 to 13
+// Port C, analog
+// Port D, pin 0 to 7
+//#define NO_PORTB_PINCHANGES
+//#define NO_PORTD_PINCHANGES
 #include <PinChangeInt.h>
-#define RIGHT_ENC_A A2
-#define RIGHT_ENC_B A3
-#define LEFT_ENC_A A4
-#define LEFT_ENC_B A5
+#define RIGHT_ENC_A A0 //A0, 7
+#define RIGHT_ENC_B A1 //A1, 6
+#define LEFT_ENC_A A2 //A2, 5
+#define LEFT_ENC_B A3 //A3, 4
 
 int16_t enc_left = 0, enc_right = 0;
 unsigned long serialdata;
@@ -109,6 +131,23 @@ double filt_current2_ST = 0;
 
 void setup() {
   Serial.begin(115200);
+  
+  if(!bno.begin())
+  {
+    // There was a problem detecting the BNO055 ... check your connections
+    Serial.print("Ooops, no BNO055 detected ... Check your wiring or I2C ADDR!");
+    // Send CAN ERROR MESSAGE, Software Reset, continue, do NOT use while(1)
+    //while(1);
+  }
+  else
+  {
+    delay(200);
+    bno.setExtCrystalUse(true);
+    gyroReady = true;
+  }
+  gyro_time = millis();
+  
+  
   timeDEBUG = millis();
   timeCMD = millis();
 
@@ -137,6 +176,18 @@ void setup() {
 }
 
 void loop() {
+  
+  if(timeSince(gyro_time) > GYRO_PERIOD)
+  {
+    imu::Vector<3> gyro = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+    float dt = (float)timeSince(gyro_time)/1000.0;
+    gyro_time = millis();
+    gyro_z = (gyro.z()+GYRO_BIAS_DEG) * GYRO_SCALE_FACTOR;
+    delta_yaw_deg += gyro_z*dt;
+    yaw_deg += gyro_z*dt;
+  }
+  
+  
   /*if(digitalRead(7) == HIGH)
   {
     enc_left += 1;
@@ -223,6 +274,15 @@ void loop() {
   
   if(timeSince(timeDEBUG) > DEBUG_PERIOD)
   {
+    /*Serial.print("gyro z: ");
+    Serial.println(gyro_z);
+    Serial.print("delta_yaw_deg: ");
+    Serial.println(delta_yaw_deg);
+    Serial.print("yaw_deg: ");
+    Serial.println(yaw_deg);
+    Serial.print("enc_left:"); Serial.print(enc_left); Serial.print("\t");
+    Serial.print("enc_right:"); Serial.println(enc_right);
+    */
     // Print latest valid values from all channels
     /*for (int channel = 1; channel <= channelAmount; ++channel) {
         unsigned long value = ppm.latestValidChannelValue(channel, 0);
@@ -336,7 +396,10 @@ void loop() {
             Serial.println(enc_left);
             enc_left = 0;
             Serial.println(enc_right);
-            enc_right = 0;           
+            enc_right = 0;
+            Serial.println(int(gyro_z*100));
+            //Serial.println(int(delta_yaw_deg*1000));
+            delta_yaw_deg = 0.0;
             break;
           }
         }
