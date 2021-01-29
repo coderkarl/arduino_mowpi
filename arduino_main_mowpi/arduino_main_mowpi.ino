@@ -1,5 +1,31 @@
-// BNO055
+#include <SPI.h>
+#include <RH_RF95.h>
+//for Feather32u4 RFM9x
+#define RFM95_CS 8
+#define RFM95_RST 4
+#define RFM95_INT 7
+// Change to 434.0 or other frequency, must match RX's freq!
+#define RF95_FREQ 915.0
+// Singleton instance of the radio driver
+RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
+#define PACKET_TIMEOUT 300
+long timeNewPacket;
+
+// Read "PPM" data directly from radio packets
+//RC CHANNELS
+#define RC_STEER 0
+#define RC_SPEED 1
+#define RC_BLADE 3
+#define RC_AUTO 2
+
+#define NUM_CHANNELS 8
+#define DEFAULT_PULSE_LENGTH 1500
+volatile uint16_t ppm[NUM_CHANNELS];
+
+#define LED 13
+
+// BNO055
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
@@ -13,12 +39,6 @@ float delta_yaw_deg = 0.0;
 float yaw_deg = 0.0;
 float gyro_z = 0.0;
 
-
-
-// https://github.com/Nikkilae/PPM-reader
-#include <PPMReader.h>
-// #include <InterruptHandler.h>   <-- You may need this on some versions of Arduino
-
 #include <BladeControl.h>
 // ln -s <full BladeControl path> <full Arduino libraries path/BladeControl>
 // ln -s ~/Projects/mower_chassis/arduino_mowpi/BladeControl ~/Arduino/libraries/BladeControl
@@ -29,15 +49,6 @@ float gyro_z = 0.0;
 #define CMD_FILT_FACTOR 0.5
 
 #define BOT_RADIUS_CM 35.0
-
-// Initialize a PPMReader on digital pin 3 with 6 expected channels.
-// PPMReader uses hard interrupts, uno pins 2 or 3
-// attachInterrupt(digitalPinToInterrupt(interruptPin), RISING);
-int interruptPin = 3;
-int channelAmount = 6;
-PPMReader ppm(interruptPin, channelAmount);
-#define PPM_ERROR_PIN 10
-bool ppm_error_state = false;
 
 long timeDEBUG, timeCMD;
 long timeREQBLADE;
@@ -57,32 +68,20 @@ int omega_deg = 0;
 int left_auto_output = 0;
 int right_auto_output = 0;
 
-//RC CHANNELS
-#define RC_STEER 1
-#define RC_SPEED 2
-#define RC_THROTTLE 5
-#define RC_BLADE 4
-#define RC_AUTO 3
+//*****************ENCODERS****************
+#include <YetAnotherPcInt.h>
+#define RIGHT_ENC_A 11
+#define RIGHT_ENC_B 10
+#define LEFT_ENC_A 9
+#define LEFT_ENC_B 6
+volatile int16_t enc_left = 0, enc_right = 0;
 
-//**************Encoders*************
-// Port B, pin 8 to 13
-// Port C, analog
-// Port D, pin 0 to 7
-//#define NO_PORTB_PINCHANGES
-//#define NO_PORTD_PINCHANGES
-#include <PinChangeInt.h>
-#define RIGHT_ENC_A A0 //A0, 7
-#define RIGHT_ENC_B A1 //A1, 6
-#define LEFT_ENC_A A2 //A2, 5
-#define LEFT_ENC_B A3 //A3, 4
-
-int16_t enc_left = 0, enc_right = 0;
 unsigned long serialdata;
 int inbyte = 0;
 
 //********** Blade Control ************
-# define BLADE_PIN_A 11
-# define BLADE_PIN_B 12
+# define BLADE_PIN_A 12 // micro_PCB IN1 --> relay IN2 (rewire blade control wires)
+# define BLADE_PIN_B A5 // micro_PCB IN2 --> relay IN1 (rewire blade control wires)
 BladeControl blade_control(BLADE_PIN_A, BLADE_PIN_B);
 
 // Sabertooth Describe configuration
@@ -92,21 +91,7 @@ BladeControl blade_control(BLADE_PIN_A, BLADE_PIN_B);
 
 #include <USBSabertooth_NB.h>
 
-#include <AltSoftSerial.h>
-
-// AltSoftSerial always uses these pins:
-//
-// Board          Transmit  Receive   PWM Unusable
-// -----          --------  -------   ------------
-// Teensy 3.0 & 3.1  21        20         22
-// Teensy 2.0         9        10       (none)
-// Teensy++ 2.0      25         4       26, 27
-// Arduino Uno        9         8         10
-// Arduino Leonardo   5        13       (none)
-// Arduino Mega      46        48       44, 45
-
-AltSoftSerial altSerial;
-USBSabertoothSerial saberSerial(altSerial);
+USBSabertoothSerial saberSerial(Serial1);
 USBSabertooth ST(saberSerial, 128); // Address 128, and use saberSerial as the serial port.
 
 // Sabertooth feedback data
@@ -130,6 +115,44 @@ double filt_current2_ST = 0;
 //    Map manual mode speed, steer pwm to speed, omega
 
 void setup() {
+  timeNewPacket = millis();
+  pinMode(LED, OUTPUT);
+  digitalWrite(LED, HIGH);
+  pinMode(RFM95_RST, OUTPUT);
+  digitalWrite(RFM95_RST, HIGH);
+  delay(100);
+  // manual reset
+  digitalWrite(RFM95_RST, LOW);
+  delay(10);
+  digitalWrite(RFM95_RST, HIGH);
+  delay(10);
+  while (!rf95.init()) {
+    Serial.println("LoRa radio init failed");
+    Serial.println("Uncomment '#define SERIAL_DEBUG' in RH_RF95.cpp for detailed debug info");
+    while (1) {
+      digitalWrite(13, LOW);
+      delay(500);
+      digitalWrite(13,HIGH);
+      delay(500);
+    }
+  }
+  Serial.println("LoRa radio init OK!");
+
+  // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM
+  if (!rf95.setFrequency(RF95_FREQ)) {
+    Serial.println("setFrequency failed");
+    while (1) {
+      digitalWrite(13, LOW);
+      delay(500);
+      digitalWrite(13,HIGH);
+      delay(500);
+    }
+  }
+  Serial.print("Set Freq to: "); Serial.println(RF95_FREQ);
+
+  // you can set transmitter powers from 5 to 23 dBm:
+  rf95.setTxPower(23, false);
+  
   Serial.begin(115200);
   
   if(!bno.begin())
@@ -151,20 +174,16 @@ void setup() {
   timeDEBUG = millis();
   timeCMD = millis();
 
-  altSerial.begin(9600);
+  Serial1.begin(9600);
   //ST.autobaud();
 
-
-  //pinMode(7, INPUT_PULLUP);
-  pinMode(PPM_ERROR_PIN, OUTPUT);
-  digitalWrite(PPM_ERROR_PIN, LOW);
-
+  //ENCODERS
   pinMode(LEFT_ENC_A, INPUT);
   pinMode(LEFT_ENC_B, INPUT);
   pinMode(RIGHT_ENC_A, INPUT);
   pinMode(RIGHT_ENC_B, INPUT);
-  attachPinChangeInterrupt(RIGHT_ENC_A, right_enc_tick, CHANGE);
-  attachPinChangeInterrupt(LEFT_ENC_A, left_enc_tick, CHANGE);
+  PcInt::attachInterrupt(RIGHT_ENC_A, right_enc_tick, CHANGE);
+  PcInt::attachInterrupt(LEFT_ENC_A, left_enc_tick, CHANGE);
 
   ST.drive(scaled_speed_power);
   ST.turn(scaled_steer_power);
@@ -175,7 +194,13 @@ void setup() {
   //Serial.println("Setup complete");
 }
 
-void loop() {
+void loop()
+{
+
+  if(timeSince(timeNewPacket) > PACKET_TIMEOUT)
+  {
+    set_default_ppm();
+  }
   
   if(timeSince(gyro_time) > GYRO_PERIOD)
   {
@@ -187,12 +212,6 @@ void loop() {
     yaw_deg += gyro_z*dt;
   }
   
-  
-  /*if(digitalRead(7) == HIGH)
-  {
-    enc_left += 1;
-    enc_right += 1;
-  }*/
   int bladeCmdA;
   int bladeCmdB;
   int bladeState = -1;
@@ -232,45 +251,6 @@ void loop() {
   }
 
   update_ST_data();
-
-  steer_pwm = ppm.latestValidChannelValue(RC_STEER, 1500);
-  speed_pwm = ppm.latestValidChannelValue(RC_SPEED, 1500);
-  blade_pwm = ppm.latestValidChannelValue(RC_BLADE, 1500);
-  auto_pwm = ppm.latestValidChannelValue(RC_AUTO, 1500);
-  if( (abs(steer_pwm - 1500) > 300) || blade_pwm < 1400)
-  {
-    if(!ppm_error_state)
-    {
-      digitalWrite(PPM_ERROR_PIN, HIGH);
-      ppm_error_state = true;
-    }
-  }
-  else if(ppm_error_state)
-  {
-    ppm_error_state = false;
-    digitalWrite(PPM_ERROR_PIN, LOW);
-  }
-
-  /*if(abs(steer_pwm - prev_steer_pwm) > 200 && abs(steer_pwm - 1500) > 50)
-  {
-    steer_pwm = prev_steer_pwm;
-  }
-  if(abs(speed_pwm - prev_speed_pwm) > 200 && abs(speed_pwm - 1500) > 50)
-  {
-    speed_pwm = prev_speed_pwm;
-  }
-  if(abs(blade_pwm - prev_blade_pwm) > 200 && abs(blade_pwm - 1500) > 50)
-  {
-    blade_pwm = prev_blade_pwm;
-  }
-  if(abs(auto_pwm - prev_auto_pwm) > 200 && abs(auto_pwm - 1500) > 50)
-  {
-    auto_pwm = prev_auto_pwm;
-  }*/
-  prev_steer_pwm = steer_pwm;
-  prev_speed_pwm = speed_pwm;
-  prev_blade_pwm = blade_pwm;
-  prev_auto_pwm = auto_pwm;
   
   if(timeSince(timeDEBUG) > DEBUG_PERIOD)
   {
@@ -318,6 +298,16 @@ void loop() {
 
   if(millis() - timeCMD > CMD_PERIOD)
   {
+      steer_pwm = ppm[RC_STEER];
+      speed_pwm = ppm[RC_SPEED];
+      blade_pwm = ppm[RC_BLADE];
+      auto_pwm = ppm[RC_AUTO];
+    
+      prev_steer_pwm = steer_pwm;
+      prev_speed_pwm = speed_pwm;
+      prev_blade_pwm = blade_pwm;
+      prev_auto_pwm = auto_pwm;
+    
     timeCMD = millis();
     if(auto_pwm < 1700)
     {
@@ -406,8 +396,52 @@ void loop() {
         break;
       } // end A3/
     } // end switch serialdata
-  }
+  } // end if Serial.read() == 'A'
+
+  if (rf95.available())
+  {
+    // Should be a message for us now
+    uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+    uint8_t len = sizeof(buf);
+
+    if (rf95.recv(buf, &len))
+    {
+      if(buf[0] == 0xCC && buf[1] == 0xAA)
+      {
+        for(int k=0; k<4; ++k)
+        {
+          int16_t pulse_val = buf[2*k+2]*255 + buf[2*k+3]; //1000 to 2000
+          
+          if(pulse_val < 900 || pulse_val > 2010)
+          {
+            pulse_val = 1500;
+          }
+          else if(pulse_val < 1001)
+          {
+            pulse_val = 1001;
+          }
+          else if(pulse_val > 1999)
+          {
+            pulse_val = 1999;
+          }
+          ppm[k] = pulse_val; //Consider hard coding to 1500 and see if it removes hiccups
+        }
+        timeNewPacket = millis();
+      }
+    }
+    else
+    {
+      Serial.println("Receive failed");
+    }
+  } // end if rf95 data available
   
+} // end loop
+
+void set_default_ppm()
+{
+  for(int i = 0; i < NUM_CHANNELS; ++i){
+    ppm[i]= DEFAULT_PULSE_LENGTH;
+  }
 }
 
 long getSerial()
