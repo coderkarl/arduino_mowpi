@@ -80,8 +80,8 @@ unsigned long serialdata;
 int inbyte = 0;
 
 //********** Blade Control ************
-# define BLADE_PIN_A 12 // micro_PCB IN1 --> relay IN2 (rewire blade control wires)
-# define BLADE_PIN_B A5 // micro_PCB IN2 --> relay IN1 (rewire blade control wires)
+# define BLADE_PIN_A A5 // micro_PCB IN1 --> relay IN1
+# define BLADE_PIN_B 12 // micro_PCB IN2 --> relay IN2
 BladeControl blade_control(BLADE_PIN_A, BLADE_PIN_B);
 
 // Sabertooth Describe configuration
@@ -189,7 +189,7 @@ void setup() {
   ST.turn(scaled_steer_power);
 
   // start reading from sabertooth
-  ST.async_getBattery( 1, 0 );  // request battery voltage with context 0
+  //ST.async_getBattery( 1, 0 );  // request battery voltage with context 0
 
   //Serial.println("Setup complete");
 }
@@ -250,7 +250,7 @@ void loop()
     }
   }
 
-  update_ST_data();
+  //update_ST_data();
   
   if(timeSince(timeDEBUG) > DEBUG_PERIOD)
   {
@@ -291,8 +291,9 @@ void loop()
 
     Serial.print("current2, filt: ");
     Serial.print(current2_ST); Serial.print(","); Serial.println(filt_current2_ST);
-    */
     
+    Serial.print("gyro z: "); Serial.println(gyro_z);
+    */
     timeDEBUG = millis();
   }
 
