@@ -9,8 +9,10 @@
 // Singleton instance of the radio driver
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
+#define SERIAL_TIMEOUT 300
 #define PACKET_TIMEOUT 300
-long timeNewPacket;
+long timeNewPacket, timeNewSerial;
+bool blockBlade = false;
 
 // Read "PPM" data directly from radio packets
 //RC CHANNELS
@@ -116,6 +118,7 @@ double filt_current2_ST = 0;
 
 void setup() {
   timeNewPacket = millis();
+  timeNewSerial = millis();
   pinMode(LED, OUTPUT);
   digitalWrite(LED, HIGH);
   pinMode(RFM95_RST, OUTPUT);
@@ -200,6 +203,14 @@ void loop()
   if(timeSince(timeNewPacket) > PACKET_TIMEOUT)
   {
     set_default_ppm();
+  }
+
+  if(timeSince(timeNewSerial) > SERIAL_TIMEOUT)
+  {
+    speed_cm = 0;
+    omega_deg = 0;
+    blockBlade = true; // NOT USED, do not block once in manual mode maybe
+    timeNewSerial = millis();
   }
   
   if(timeSince(gyro_time) > GYRO_PERIOD)
@@ -363,6 +374,7 @@ void loop()
             // Read the next two numbers <raw speed 0 to 240>/<raw omega 0 to 240>/
             speed_cm = getSerial()-120;
             omega_deg = getSerial()-120;
+            timeNewSerial = millis();
             
             // Read the next two bytes as int8 speed cm/s, int8 omega deg/sec
             //int speed_cm = Serial.read() - 120;
@@ -443,6 +455,7 @@ void set_default_ppm()
   for(int i = 0; i < NUM_CHANNELS; ++i){
     ppm[i]= DEFAULT_PULSE_LENGTH;
   }
+  timeNewPacket = millis();
 }
 
 long getSerial()
