@@ -341,8 +341,21 @@ void loop()
     }
     else //auto mode!
     {
-      float left_cm = speed_cm - BOT_RADIUS_CM*float(omega_deg)*3.14/180.0;
-      float right_cm = speed_cm + BOT_RADIUS_CM*float(omega_deg)*3.14/180.0;
+      float omega_comp_cm = BOT_RADIUS_CM*float(omega_deg)*3.14/180.0;
+      float left_cm = speed_cm - omega_comp_cm;
+      float right_cm = speed_cm + omega_comp_cm;
+      /*if(fabs(omega_comp_cm) > fabs(speed_cm/2))
+      {
+        if(omega_deg * speed_cm >= 0)
+        {
+          //fix the left wheel, use half omega which means right_cm is the same
+          left_cm = 0.0;
+        }
+        else if(omega_deg * speed_cm <= 0)
+        {
+          right_cm = 0.0;
+        }
+      }*/
       left_cm = min(left_cm, 150);
       left_cm = max(left_cm, -150);
       right_cm = min(right_cm, 150);
