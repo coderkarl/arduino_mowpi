@@ -23,7 +23,7 @@ bool blockBlade = false;
 
 #define NUM_CHANNELS 8
 #define DEFAULT_PULSE_LENGTH 1500
-volatile uint16_t ppm[NUM_CHANNELS];
+uint16_t ppm[NUM_CHANNELS];
 
 #define LED 13
 
@@ -107,6 +107,8 @@ double filt_current2_ST = 0;
 
 #define LEFT_MOTOR 1
 #define RIGHT_MOTOR 2
+
+uint8_t mow_area = 0;
 
 // With USBSabertooth, use:
 //  ST.drive(-2047 to 2047) in manual mode
@@ -314,6 +316,7 @@ void loop()
       speed_pwm = ppm[RC_SPEED];
       blade_pwm = ppm[RC_BLADE];
       auto_pwm = ppm[RC_AUTO];
+      //Serial.println(speed_pwm);
     
       prev_steer_pwm = steer_pwm;
       prev_speed_pwm = speed_pwm;
@@ -406,6 +409,11 @@ void loop()
         getSerial(); // A3/1,2,3,4/
         switch (serialdata)
         {
+          case 1: // A3/1/
+          {
+            Serial.println(mow_area);
+            break;
+          }
           case 4: // A3/4/
           {
             //encLeft/Right read and reset
@@ -436,7 +444,7 @@ void loop()
       {
         for(int k=0; k<4; ++k)
         {
-          int16_t pulse_val = buf[2*k+2]*255 + buf[2*k+3]; //1000 to 2000
+          int16_t pulse_val = buf[2*k+2]*256 + buf[2*k+3]; //1000 to 2000
           
           if(pulse_val < 900 || pulse_val > 2010)
           {
@@ -453,6 +461,26 @@ void loop()
           ppm[k] = pulse_val; //Consider hard coding to 1500 and see if it removes hiccups
         }
         timeNewPacket = millis();
+      }
+      else if(buf[0] == 0xCC && buf[1] == 0xAB)
+      {
+        uint8_t msgType = buf[2];
+        switch(msgType)
+        {
+          case 0:
+          {
+            // Set which area to mow
+            mow_area = buf[3];
+            //Serial.print("Mow Area : ");
+            //Serial.println(mow_area);
+            break;
+          }
+          case 1:
+          {
+            // 
+            break;
+          }
+        }
       }
     }
     else
