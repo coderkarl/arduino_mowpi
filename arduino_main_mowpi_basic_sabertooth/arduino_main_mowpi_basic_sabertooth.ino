@@ -50,7 +50,7 @@ float gyro_z = 0.0;
 #define BLADE_DB 500
 #define CMD_FILT_FACTOR 0.5
 
-#define BOT_RADIUS_CM 35.0
+#define BOT_RADIUS_CM 27.5
 
 long timeDEBUG, timeCMD;
 long timeREQBLADE;
@@ -104,8 +104,8 @@ double filt_current2_ST = 0;
 
 //CircularBuffer current1_buffer(10);
 
-#define LEFT_MOTOR 1
-#define RIGHT_MOTOR 2
+#define LEFT_MOTOR 2
+#define RIGHT_MOTOR 1
 
 uint8_t mow_area = 0;
 
@@ -359,12 +359,12 @@ void loop()
           right_cm = 0.0;
         }
       }*/
-      left_cm = min(left_cm, 100);
-      left_cm = max(left_cm, -100);
-      right_cm = min(right_cm, 100);
-      right_cm = max(right_cm, -100);
-      int left_output = left_cm * 0.6; //-127 t 127, 40 cm/sec maps to 24 for now
-      int right_output = right_cm * 0.6;
+      left_cm = min(left_cm, 120);
+      left_cm = max(left_cm, -120);
+      right_cm = min(right_cm, 120);
+      right_cm = max(right_cm, -120);
+      int left_output = left_cm * 0.8; //-127 t 127, 40 cm/sec maps to 24 for now
+      int right_output = right_cm * 0.8;
       left_auto_output = left_auto_output * CMD_FILT_FACTOR + left_output * (1 - CMD_FILT_FACTOR);
       right_auto_output = right_auto_output * CMD_FILT_FACTOR + right_output * (1 - CMD_FILT_FACTOR);
       ST.motor(LEFT_MOTOR, left_auto_output);
