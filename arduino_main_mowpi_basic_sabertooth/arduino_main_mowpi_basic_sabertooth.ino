@@ -76,7 +76,9 @@ int right_auto_output = 0;
 #define RIGHT_ENC_B 10
 #define LEFT_ENC_A 9
 #define LEFT_ENC_B 6
-volatile int16_t enc_left = 0, enc_right = 0;
+volatile int16_t encLeft = 0, encRight = 0;
+int16_t prevEncLeft = 0, prevEncRight = 0;
+uint16_t timeSpeedUpdate;
 
 unsigned long serialdata;
 int inbyte = 0;
@@ -107,6 +109,13 @@ double filt_current2_ST = 0;
 #define LEFT_MOTOR 2
 #define RIGHT_MOTOR 1
 
+//*************Velocity tuning gains*********
+#define KF 0.8    // Feedforward:  1m/s results in 50% power to motors
+#define KP 0.0    // Proportional:  No proportional gain
+#define KI 0.2     // Integral: 1m/s error results in 0 to 100% ramp of 1 second with 100ms control loop
+#define ENC_CM_PER_TICK (100.0 / 1028.0)
+float measuredVelocityLeft, measuredVelocityRight;
+
 uint8_t mow_area = 0;
 
 // With USBSabertooth, use:
@@ -120,6 +129,7 @@ uint8_t mow_area = 0;
 void setup() {
   timeNewPacket = millis();
   timeNewSerial = millis();
+  timeSpeedUpdate = millis();
   pinMode(LED, OUTPUT);
   digitalWrite(LED, HIGH);
   pinMode(RFM95_RST, OUTPUT);
@@ -271,8 +281,8 @@ void loop()
     Serial.println(delta_yaw_deg);
     Serial.print("yaw_deg: ");
     Serial.println(yaw_deg);
-    Serial.print("enc_left:"); Serial.print(enc_left); Serial.print("\t");
-    Serial.print("enc_right:"); Serial.println(enc_right);
+    Serial.print("encLeft:"); Serial.print(encLeft); Serial.print("\t");
+    Serial.print("encRight:"); Serial.println(encRight);
     */
     // Print latest valid values from all channels
     /*for (int channel = 1; channel <= channelAmount; ++channel) {
@@ -287,8 +297,8 @@ void loop()
     Serial.print("speed:"); Serial.print(speed_pwm); Serial.print("\t");
     Serial.print("blade:"); Serial.print(blade_pwm); Serial.print("\t");
     Serial.print("auto:"); Serial.print(auto_pwm); Serial.print("\t");
-    Serial.print("enc_left:"); Serial.print(enc_left); Serial.print("\t");
-    Serial.print("enc_right:"); Serial.println(enc_right);
+    Serial.print("encLeft:"); Serial.print(encLeft); Serial.print("\t");
+    Serial.print("encRight:"); Serial.println(encRight);
     
     Serial.print("bladeState: "); Serial.print(bladeState);
     Serial.print(" ("); Serial.print(bladeCmdA); Serial.print(","); Serial.print(bladeCmdB);
@@ -325,20 +335,35 @@ void loop()
     timeCMD = millis();
     if(auto_pwm < 1700)
     {
+      float left_cm = 0.0;
+      float right_cm = 0.0;
       if(abs(speed_pwm - 1500) <= 500 && abs(steer_pwm-1500) <= 500 &&
          abs(speed_pwm - 1500) > 40 || abs(steer_pwm-1500) > 40)
       {
         // power -127 to 127
         scaled_speed_power = ((float)(speed_pwm - 1500))*0.15;
         scaled_steer_power = ((float)(steer_pwm - 1500))*0.15;
+
+        float man_speed_cm = ((float)(speed_pwm - 1500))*0.2;
+        float man_omega_deg = -((float)(steer_pwm - 1500))*0.2;
+        if (abs(speed_pwm - 1500) <= 40) {
+          man_speed_cm = 0.0;
+          scaled_speed_power = 0;
+        }
+        Serial.print("man speed cm "); Serial.print(man_speed_cm);
+        Serial.print(", man_omega_deg "); Serial.print(man_omega_deg);
+        float omega_comp_cm = BOT_RADIUS_CM*float(man_omega_deg)*3.14/180.0;
+        left_cm = man_speed_cm - omega_comp_cm;
+        right_cm = man_speed_cm + omega_comp_cm;
       }
       else
       {
         scaled_speed_power = 0;
         scaled_steer_power = 0;
       }
-      ST.drive(scaled_speed_power);
-      ST.turn(scaled_steer_power);
+      //ST.drive(scaled_speed_power);
+      //ST.turn(scaled_steer_power);
+      updateSpeed(left_cm, right_cm);
       left_auto_output = 0;
       right_auto_output = 0;
     }
@@ -363,7 +388,7 @@ void loop()
       left_cm = max(left_cm, -120);
       right_cm = min(right_cm, 120);
       right_cm = max(right_cm, -120);
-      int left_output = left_cm * 0.8; //-127 t 127, 40 cm/sec maps to 24 for now
+      int left_output = left_cm * 0.8; //-127 t 127, 100 cm/sec maps to 80 for now
       int right_output = right_cm * 0.8;
       left_auto_output = left_auto_output * CMD_FILT_FACTOR + left_output * (1 - CMD_FILT_FACTOR);
       right_auto_output = right_auto_output * CMD_FILT_FACTOR + right_output * (1 - CMD_FILT_FACTOR);
@@ -417,10 +442,10 @@ void loop()
           case 4: // A3/4/
           {
             //encLeft/Right read and reset
-            Serial.println(enc_left);
-            enc_left = 0;
-            Serial.println(enc_right);
-            enc_right = 0;
+            Serial.println(encLeft);
+            encLeft = 0;
+            Serial.println(encRight);
+            encRight = 0;
             Serial.println(int(gyro_z*100));
             //Serial.println(int(delta_yaw_deg*1000));
             delta_yaw_deg = 0.0;
@@ -491,6 +516,68 @@ void loop()
   
 } // end loop
 
+void updateSpeed(float left_cm, float right_cm) 
+{
+  float spdLeft, spdRight;
+  float errorLeft, errorRight;
+  static int16_t escLus, escRus;
+  static float prevSpdLeft, prevSpdRight, prevErrorLeft, prevErrorRight;
+  spdLeft = left_cm;
+  spdRight = right_cm;
+  
+  // Speed left/right are in cm/second.  Convert to pulse widths in us based on tuning
+  // parameters.  Use a PI control with feed-forward, in the derivative form.
+  //   Standard form:  escLus = KF * spdLeft + KP * error + KI * errInt
+  //   Derivative form:  escLus += KF * (spdLeft - prevSpdLeft) + KP * (error - prevError) + KI * error
+  // The advantage of the derivative form is that it simplifies handling of integral runaway.
+  float vScale = 1000.0 * ENC_CM_PER_TICK / timeSince(timeSpeedUpdate);
+  timeSpeedUpdate = millis();
+  measuredVelocityLeft = (int16_t)(encLeft - prevEncLeft) * vScale;
+  measuredVelocityRight = (int16_t)(encRight - prevEncRight) * vScale;
+  prevEncLeft = encLeft;
+  prevEncRight = encRight;
+  errorLeft = spdLeft - measuredVelocityLeft;
+  escLus += (int16_t)(KF * (spdLeft - prevSpdLeft)) + KP * (errorLeft - prevErrorLeft) + KI * errorLeft;
+  prevSpdLeft = spdLeft;
+  prevErrorLeft = errorLeft;
+  errorRight = spdRight - measuredVelocityRight;
+  escRus += (int16_t)(KF * (spdRight - prevSpdRight)) + KP * (errorRight - prevErrorRight) + KI * errorRight;
+  prevSpdRight = spdRight;
+  prevErrorRight = errorRight;
+  
+  // The speeds are now in signed cmd_units centered around 0, where positive is forward.
+  // Limit to the range +/-127 (max cmd for basic sabertooth API).
+  // NOTE:  This is the step that handles integral runaway.  The clipped speeds will be used as the
+  // starting point for the next PI calculation, so the integral can never run away.
+  if (escLus > 127) escLus = 127;
+  else if (escLus < -127) escLus = -127;
+  if (escRus > 127) escRus = 127;
+  else if (escRus < -127) escRus = -127;
+
+  if (left_cm == 0) {
+    escLus = 0;
+  }
+  if (right_cm == 0) {
+    escRus = 0;
+  }
+
+  static int16_t left_esc_out, right_esc_out;
+  left_esc_out = (int16_t)( (float)(left_esc_out) * CMD_FILT_FACTOR + float(escLus) * (1.0 - CMD_FILT_FACTOR) );
+  right_esc_out = (int16_t)( (float)(right_esc_out) * CMD_FILT_FACTOR + float(escRus) * (1.0 - CMD_FILT_FACTOR) );
+
+  #if 1
+    Serial.print("left cm "); Serial.print(left_cm);
+    Serial.print(", right_cm "); Serial.print(right_cm);
+    Serial.print(", left_esc_out = ");
+    Serial.print(left_esc_out);
+    Serial.print(", right_esc_out = ");
+    Serial.println(right_esc_out);
+  #endif
+
+  ST.motor(LEFT_MOTOR, left_esc_out);
+  ST.motor(RIGHT_MOTOR, right_esc_out);
+}
+
 void set_default_ppm()
 {
   for(int i = 0; i < NUM_CHANNELS; ++i){
@@ -526,11 +613,11 @@ void left_enc_tick()
   // modify using PORT operations for efficiency
   if(digitalRead(LEFT_ENC_A) != digitalRead(LEFT_ENC_B))
   {
-    enc_left--;
+    encLeft--;
   }
   else
   {
-    enc_left++;
+    encLeft++;
   }
 }
 
@@ -540,11 +627,11 @@ void right_enc_tick()
   // modify using PORT operations for efficiency
   if(digitalRead(RIGHT_ENC_A) != digitalRead(RIGHT_ENC_B))
   {
-    enc_right--;
+    encRight--;
   }
   else
   {
-    enc_right++;
+    encRight++;
   }
 }
 
