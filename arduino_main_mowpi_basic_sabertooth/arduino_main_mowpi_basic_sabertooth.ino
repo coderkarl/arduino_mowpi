@@ -1,4 +1,3 @@
-#include <SPI.h>
 #include <RH_RF95.h>
 //for Feather32u4 RFM9x
 #define RFM95_CS 8
@@ -28,7 +27,6 @@ uint16_t ppm[NUM_CHANNELS];
 #define LED 13
 
 // BNO055
-#include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
 Adafruit_BNO055 bno = Adafruit_BNO055();
@@ -48,7 +46,7 @@ float gyro_z = 0.0;
 #define DEBUG_PERIOD 500
 #define CMD_PERIOD 100
 #define BLADE_DB 500
-#define CMD_FILT_FACTOR 0.5
+#define CMD_FILT_FACTOR 0.2
 
 #define BOT_RADIUS_CM 27.5
 
@@ -110,9 +108,9 @@ double filt_current2_ST = 0;
 #define RIGHT_MOTOR 1
 
 //*************Velocity tuning gains*********
-#define KF 0.8    // Feedforward:  1m/s results in 50% power to motors
-#define KP 0.0    // Proportional:  No proportional gain
-#define KI 0.2     // Integral: 1m/s error results in 0 to 100% ramp of 1 second with 100ms control loop
+#define KF 1.2    // Feedforward:  1m/s results in 50% power to motors
+#define KP 0.1    // Proportional:  No proportional gain
+#define KI 0.25     // Integral: 1m/s error results in 0 to 100% ramp of 1 second with 100ms control loop
 #define ENC_CM_PER_TICK (100.0 / 1028.0)
 float measuredVelocityLeft, measuredVelocityRight;
 
@@ -345,13 +343,11 @@ void loop()
         scaled_steer_power = ((float)(steer_pwm - 1500))*0.15;
 
         float man_speed_cm = ((float)(speed_pwm - 1500))*0.2;
-        float man_omega_deg = -((float)(steer_pwm - 1500))*0.2;
+        float man_omega_deg = -((float)(steer_pwm - 1500))*0.4;
         if (abs(speed_pwm - 1500) <= 40) {
           man_speed_cm = 0.0;
           scaled_speed_power = 0;
         }
-        Serial.print("man speed cm "); Serial.print(man_speed_cm);
-        Serial.print(", man_omega_deg "); Serial.print(man_omega_deg);
         float omega_comp_cm = BOT_RADIUS_CM*float(man_omega_deg)*3.14/180.0;
         left_cm = man_speed_cm - omega_comp_cm;
         right_cm = man_speed_cm + omega_comp_cm;
@@ -392,8 +388,9 @@ void loop()
       int right_output = right_cm * 0.8;
       left_auto_output = left_auto_output * CMD_FILT_FACTOR + left_output * (1 - CMD_FILT_FACTOR);
       right_auto_output = right_auto_output * CMD_FILT_FACTOR + right_output * (1 - CMD_FILT_FACTOR);
-      ST.motor(LEFT_MOTOR, left_auto_output);
-      ST.motor(RIGHT_MOTOR, right_auto_output);
+      //ST.motor(LEFT_MOTOR, left_auto_output);
+      //ST.motor(RIGHT_MOTOR, right_auto_output);
+      updateSpeed(left_cm, right_cm);
     }
   }
 
@@ -565,7 +562,7 @@ void updateSpeed(float left_cm, float right_cm)
   left_esc_out = (int16_t)( (float)(left_esc_out) * CMD_FILT_FACTOR + float(escLus) * (1.0 - CMD_FILT_FACTOR) );
   right_esc_out = (int16_t)( (float)(right_esc_out) * CMD_FILT_FACTOR + float(escRus) * (1.0 - CMD_FILT_FACTOR) );
 
-  #if 1
+  #if 0
     Serial.print("left cm "); Serial.print(left_cm);
     Serial.print(", right_cm "); Serial.print(right_cm);
     Serial.print(", left_esc_out = ");
