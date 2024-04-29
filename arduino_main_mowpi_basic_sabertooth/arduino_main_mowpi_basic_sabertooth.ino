@@ -27,17 +27,24 @@ uint16_t ppm[NUM_CHANNELS];
 #define LED 13
 
 // BNO055
+/*
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
 Adafruit_BNO055 bno = Adafruit_BNO055();
 #define GYRO_BIAS_DEG 0.00
 #define GYRO_SCALE_FACTOR 0.978
 bool gyroReady = false;
+*/
 #define GYRO_PERIOD 20
+#define GYRO_BIAS_DEG 0.4
 long gyro_time;
 float delta_yaw_deg = 0.0;
 float yaw_deg = 0.0;
 float gyro_z = 0.0;
+
+// Sparkfun IMU
+#include "ICM_20948.h"
+ICM_20948_I2C myICM;
 
 #include <BladeControl.h>
 // ln -s <full BladeControl path> <full Arduino libraries path/BladeControl>
@@ -167,7 +174,8 @@ void setup() {
   rf95.setTxPower(23, false);
   
   Serial.begin(115200);
-  
+
+  /*
   if(!bno.begin())
   {
     // There was a problem detecting the BNO055 ... check your connections
@@ -179,6 +187,16 @@ void setup() {
     delay(200);
     bno.setExtCrystalUse(true);
     gyroReady = true;
+  }
+  */
+
+  // Sparkfun IMU
+  Wire.begin();
+  Wire.setClock(400000);
+  myICM.begin(Wire, 1);
+  if (myICM.status != ICM_20948_Stat_Ok)
+  {
+    Serial.println("Sparkfun IMU failed");
   }
   gyro_time = millis();
   
@@ -224,12 +242,18 @@ void loop()
   
   if(timeSince(gyro_time) > GYRO_PERIOD)
   {
-    imu::Vector<3> gyro = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
     float dt = (float)timeSince(gyro_time)/1000.0;
     gyro_time = millis();
-    gyro_z = (gyro.z()+GYRO_BIAS_DEG) * GYRO_SCALE_FACTOR;
+    //imu::Vector<3> gyro = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+    //gyro_z = (gyro.z()+GYRO_BIAS_DEG) * GYRO_SCALE_FACTOR;
+    if (myICM.dataReady())
+    {
+      myICM.getAGMT();
+      gyro_z = myICM.gyrZ() + GYRO_BIAS_DEG;
+    }
     delta_yaw_deg += gyro_z*dt;
     yaw_deg += gyro_z*dt;
+    //Serial.println(yaw_deg);
   }
   
   int bladeCmdA;
