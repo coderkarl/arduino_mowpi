@@ -75,6 +75,7 @@ int right_auto_output = 0;
 #define LEFT_ENC_A 9
 #define LEFT_ENC_B 6
 volatile int16_t encLeft = 0, encRight = 0;
+volatile int16_t cumEncLeft = 0, cumEncRight = 0;
 int16_t prevEncLeft = 0, prevEncRight = 0;
 uint16_t timeSpeedUpdate;
 
@@ -440,7 +441,7 @@ void loop()
           {
             //encLeft/Right read and reset
             Serial.println(encLeft);
-            encLeft = 0;
+            encLeft = 0; // Reset encoder for ros node design. Use cumEncLeft for speed controller
             Serial.println(encRight);
             encRight = 0;
             Serial.println(int(gyro_z*100));
@@ -529,10 +530,10 @@ void updateSpeed(float left_cm, float right_cm)
   // The advantage of the derivative form is that it simplifies handling of integral runaway.
   float vScale = 1000.0 * ENC_CM_PER_TICK / timeSince(timeSpeedUpdate);
   timeSpeedUpdate = millis();
-  measuredVelocityLeft = (int16_t)(encLeft - prevEncLeft) * vScale;
-  measuredVelocityRight = (int16_t)(encRight - prevEncRight) * vScale;
-  prevEncLeft = encLeft;
-  prevEncRight = encRight;
+  measuredVelocityLeft = (int16_t)(cumEncLeft - prevEncLeft) * vScale;
+  measuredVelocityRight = (int16_t)(cumEncRight - prevEncRight) * vScale;
+  prevEncLeft = cumEncLeft;
+  prevEncRight = cumEncRight;
   errorLeft = spdLeft - measuredVelocityLeft;
   escLus += (int16_t)(KF * (spdLeft - prevSpdLeft)) + KP * (errorLeft - prevErrorLeft) + KI * errorLeft;
   prevSpdLeft = spdLeft;
@@ -610,11 +611,13 @@ void left_enc_tick()
   // modify using PORT operations for efficiency
   if(digitalRead(LEFT_ENC_A) != digitalRead(LEFT_ENC_B))
   {
-    encLeft--;
+    --encLeft;
+    --cumEncLeft;
   }
   else
   {
-    encLeft++;
+    ++encLeft;
+    ++cumEncLeft;
   }
 }
 
@@ -624,11 +627,13 @@ void right_enc_tick()
   // modify using PORT operations for efficiency
   if(digitalRead(RIGHT_ENC_A) != digitalRead(RIGHT_ENC_B))
   {
-    encRight--;
+    --encRight;
+    --cumEncRight;
   }
   else
   {
-    encRight++;
+    ++encRight;
+    ++cumEncRight;
   }
 }
 
