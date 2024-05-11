@@ -53,7 +53,7 @@ ICM_20948_I2C myICM;
 #define DEBUG_PERIOD 500
 #define CMD_PERIOD 100
 #define BLADE_DB 500
-#define CMD_FILT_FACTOR 0.2
+#define CMD_FILT_FACTOR 0.7
 
 #define BOT_RADIUS_CM 27.5
 
@@ -116,10 +116,10 @@ double filt_current2_ST = 0;
 #define RIGHT_MOTOR 1
 
 //*************Velocity tuning gains*********
-#define KF 1.2    // Feedforward:  1m/s results in 50% power to motors
+#define KF 1.8    // Feedforward:  1m/s results in 50% power to motors
 #define KP 0.1    // Proportional:  No proportional gain
 #define KI 0.25     // Integral: 1m/s error results in 0 to 100% ramp of 1 second with 100ms control loop
-#define ENC_CM_PER_TICK (100.0 / 1028.0)
+#define ENC_CM_PER_TICK (100.0 / 2005.0)
 float measuredVelocityLeft, measuredVelocityRight;
 
 uint8_t mow_area = 0;
@@ -367,8 +367,8 @@ void loop()
         scaled_speed_power = ((float)(speed_pwm - 1500))*0.15;
         scaled_steer_power = ((float)(steer_pwm - 1500))*0.15;
 
-        float man_speed_cm = ((float)(speed_pwm - 1500))*0.2;
-        float man_omega_deg = -((float)(steer_pwm - 1500))*0.4;
+        float man_speed_cm = ((float)(speed_pwm - 1500))*0.15;
+        float man_omega_deg = -((float)(steer_pwm - 1500))*0.3;
         if (abs(speed_pwm - 1500) <= 40) {
           man_speed_cm = 0.0;
           scaled_speed_power = 0;
@@ -571,10 +571,10 @@ void updateSpeed(float left_cm, float right_cm)
   // Limit to the range +/-127 (max cmd for basic sabertooth API).
   // NOTE:  This is the step that handles integral runaway.  The clipped speeds will be used as the
   // starting point for the next PI calculation, so the integral can never run away.
-  if (escLus > 127) escLus = 127;
-  else if (escLus < -127) escLus = -127;
-  if (escRus > 127) escRus = 127;
-  else if (escRus < -127) escRus = -127;
+  if (escLus > 100) escLus = 100;
+  else if (escLus < -100) escLus = -100;
+  if (escRus > 100) escRus = 100;
+  else if (escRus < -100) escRus = -100;
 
   if (left_cm == 0) {
     escLus = 0;
