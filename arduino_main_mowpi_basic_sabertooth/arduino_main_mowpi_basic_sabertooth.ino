@@ -41,12 +41,15 @@ long gyro_time;
 float delta_yaw_deg = 0.0;
 float yaw_deg = 0.0;
 float gyro_z = 0.0;
+//#define USE_BLADE_CONTROL
 
 // Sparkfun IMU
 #include "ICM_20948.h"
 ICM_20948_I2C myICM;
 
+#ifdef USE_BLADE_CONTROL
 #include <BladeControl.h>
+#endif
 // ln -s <full BladeControl path> <full Arduino libraries path/BladeControl>
 // ln -s ~/Projects/mower_chassis/arduino_mowpi/BladeControl ~/Arduino/libraries/BladeControl
 
@@ -90,9 +93,13 @@ unsigned long serialdata;
 int inbyte = 0;
 
 //********** Blade Control ************
+#ifdef USE_BLADE_CONTROL
 # define BLADE_PIN_A A5 // micro_PCB IN1 --> relay IN1
 # define BLADE_PIN_B 12 // micro_PCB IN2 --> relay IN2
 BladeControl blade_control(BLADE_PIN_A, BLADE_PIN_B);
+#endif
+
+#define BLADE_PWM_PIN 5
 
 // Sabertooth Describe configuration
 //   Set the battery type and voltage fixed in Describe.
@@ -124,6 +131,10 @@ float measuredVelocityLeft, measuredVelocityRight;
 
 uint8_t mow_area = 0;
 
+// 0 - not a waypoint, 1 - first waypoint, 2 - other waypoint, 3 - exit waypoints mode
+uint8_t waypoint_type = 0;
+bool set_waypoint = false;
+
 // With USBSabertooth, use:
 //  ST.drive(-2047 to 2047) in manual mode
 //  ST.turn(-2047 to 2047) in manual mode
@@ -135,6 +146,8 @@ uint8_t mow_area = 0;
 void setup() {
   timeNewPacket = millis();
   timeNewSerial = millis();
+  pinMode(BLADE_PWM_PIN, OUTPUT);
+  analogWrite(BLADE_PWM_PIN, 0);
   timeSpeedUpdate = millis();
   pinMode(LED, OUTPUT);
   digitalWrite(LED, HIGH);
@@ -273,7 +286,10 @@ void loop()
     
     if(blade_on)
     {
+      #ifdef USE_BLADE_CONTROL
       bladeState = blade_control.update_blade(BLADE_CONTROL_ON_STATE, bladeCmdA, bladeCmdB);
+      #endif
+      analogWrite(BLADE_PWM_PIN, 190);
     }
   }
   else
@@ -290,7 +306,10 @@ void loop()
     
     if(!blade_on)
     {
+      #ifdef USE_BLADE_CONTROL
       bladeState = blade_control.update_blade(BLADE_CONTROL_OFF_STATE, bladeCmdA, bladeCmdB);
+      #endif
+      analogWrite(BLADE_PWM_PIN, 0);
     }
   }
 
@@ -459,6 +478,9 @@ void loop()
           case 1: // A3/1/
           {
             Serial.println(mow_area);
+            Serial.println(waypoint_type);
+            set_waypoint = false;
+            waypoint_type = 0;
             break;
           }
           case 4: // A3/4/
@@ -523,8 +545,11 @@ void loop()
             break;
           }
           case 1:
+          case 2:
+          case 3:
           {
-            // 
+            set_waypoint = true;
+            waypoint_type = msgType;
             break;
           }
         }
